@@ -1,0 +1,73 @@
+"""
+脚本功能：主机所在网段存活IP地址扫描
+"""
+import scapy
+import os
+import re
+
+from scapy.layers.l2 import Ether, ARP
+from scapy.sendrecv import srp
+
+
+# 正则表达式模式，用于匹配mac地址
+PATTERN = "\w\w:\w\w:\w\w:\w\w:\w\w:\w\w"
+# 广播MAC地址
+BROADCAST_MAC = "ff:ff:ff:ff:ff:ff"
+
+"""
+该方式只适用于linux系统（ifconfig）
+参数说明：network表示网卡的名称
+返回结果：mac地址
+"""
+def get_mac_address(network):
+    # temp是一个文件
+    temp = os.popen('ifconfig ' + network)
+    # 一次读取文件中的一行，result是个列表
+    result = temp.readlines()
+    for item in result:
+        # 通过正则表达式，在ifconfig的返回结果中匹配mac地址
+        condition = re.search(PATTERN, item)
+        if condition:
+            return condition.group(0)
+
+"""
+函数功能：获取本机所在网段的所有可能ip地址
+参数说明：local_ip表示本机的ip地址
+"""
+def get_ip_list(local_ip):
+    # 通过 . 分割ip地址
+    ip_split = local_ip.split('.')
+    # 获取所有可能的ip地址
+    ip_list = []
+    for i in range(1, 255):
+        ip_list.append(ip_split[0]+":"+ip_split[1]+":"+ip_split[2]+":"+str(i))
+    return ip_list
+
+"""
+函数功能：通过arp协议扫描主机所在网段存活的主机
+参数说明：
+"""
+def arp_scan(local_ip, network):
+    mac = get_mac_address(network)
+    ip_list = get_ip_list(local_ip)
+    # temp
+    temp = srp(Ether(src=mac,dst=BROADCAST_MAC)/
+               ARP(op=1,hwsrc=mac,hwdst=BROADCAST_MAC,psrc=local_ip,pdst=ip_list),
+               iface=network,timeout=1,verbose=False)
+    # temp是一个长度为2的列表，temp[0]表示有回应的数据包对，temp[1]表示无回应的数据包
+    result = temp[0].res
+    result_list = []
+    for i in range(len(result)):
+        # 通过回应数据包的ARP层字段获取存活主机的 ip 和 mac
+        result_ip = result[i][1].getlayer(ARP).fields['psrc']
+        result_mac = result[i][1].getlayer(ARP).fields['hwsrc']
+        result_list.append((result_ip, result_mac))
+    return result_list
+
+if __name__ == '__main__':
+    network = "ens33"
+    local_ip = "192.168.93.130"
+
+    result = arp_scan(local_ip,network)
+    for item in result:
+        print(item[0], item[1])
